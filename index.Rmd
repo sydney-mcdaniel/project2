@@ -46,92 +46,275 @@ class_diag <- function(score, truth, positive, cutoff=.5){
 
 # Mining, Classification, Prediction
 
-## Name and EID here
+## Sydney McDaniel, sbm2374
 
 ### Introduction 
 
-Paragraph or two introducing your datasets and variables, why they are interesting to you, etc. See instructions for more information
+The data set being used for this project is "Presidents"; this set was retrieved from Kaggle.com. Taking a glimpse at this data set, the variables include: Election Year, Candidate Name, Home State, Candidate Party, Popular Vote (number of votes received), Popular Vote Share (as a proportion of the total votes cast in that election), Electoral Vote (number of votes received), and Electoral Vote Share (as a proportion of the total votes cast by electoral college). There were 358 observations in the original data set. However, information regarding popular and electoral votes were missing for some of the candidates. The cleaned data set [i.e., not including these rows] has 319 observations. 
 
+The binary variable,-Incumbent [whether the candidate was already President]-, has 287 observations for "N" [No], and 32 observations for "Y" [Yes].
+The categorical variable Candidate Party has 62 distinct observations; the categorical variable Home State has 45 distinct observations
+
+As someone who has always been interested in politics/government, I'll enjoy exploring this data set. There are lots of qualitative variables that can be compared to the categorical variable, Candidate Party, [Independent, Federalist, Democratic, etc] and the binary variable, Incumbent. Before performing any analyses, I predict that incumbent candidates will have higher electoral and popular vote shares than those who were not incumbents. 
+
+##### Importing data
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
+library(readr)
+US_Presidential_Election_Results_ResultsByCandidate <- read_csv("~/project2/US Presidential Election Results - ResultsByCandidate.csv", 
+    col_types = cols(ElectionYear = col_number(), 
+        PopularVote = col_number(), PopVoteShare = col_number(), 
+        ElectoralVotes = col_number(), ElecVoteShare = col_number()))
+```
 
-# if your dataset needs tidying, do so here
+##### Cleaning up data
+```{R}
+Presidents <- US_Presidential_Election_Results_ResultsByCandidate %>% filter(!PopularVote == 0) %>% select(-CandPartyAbbrev)
+Presidents$Incumbent <- Presidents$`Incumbent?`
+glimpse(Presidents)
+```
 
-# any other code here
+##### How Many Observations for Binary Variable?
+```{R}
+Presidents %>% filter(Incumbent == "N")
+Presidents %>% filter(Incumbent == "Y")
+```
+
+##### How Many Observations for Each Candidate Party
+```{R}
+Presidents %>% count(n_distinct(CandParty))
+```
+
+##### How Many Observations for Each Home State
+```{R}
+Presidents %>% count(n_distinct(HomeState))
 ```
 
 ### Cluster Analysis
 
+##### Determining how many clusters to use
 ```{R}
 library(cluster)
-# clustering code here
+set.seed(322)
+sil_width2<-vector()
+for(i in 2:10){  
+  pam_fit <- pam(Presidents, k = i)  
+  sil_width2[i] <- pam_fit$silinfo$avg.width  
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width2))+scale_x_continuous(name="k",breaks=1:10)
 ```
 
-Discussion of clustering here
-    
+##### Cleaning Up Presidents Dataset 
+```{R}
+PresidentsCleaned <- Presidents %>% distinct(CandidateName, .keep_all = TRUE)
+Presidents1 <- PresidentsCleaned %>% mutate_if(is.character,as.factor) %>% column_to_rownames("CandidateName")
+
+#Saving as a vector
+Presidentsx <- Presidents1 %>% select_if(is.numeric) %>% as.data.frame
+pam <- Presidentsx %>% pam(2)
+```
+
+##### Determining how good the solution is
+```{R}
+pam$silinfo$avg.width
+pam$silinfo$clus.avg.widths
+plot(pam,which=2)
+```
+
+##### Summarizing cluster
+```{R}
+Presidentsx <- Presidentsx %>% mutate(cluster=as.factor(pam$clustering))
+Presidentsx %>% group_by(cluster) %>% summarize_if(is.numeric,mean,na.rm=T)
+Presidentsx %>% slice(pam$id.med)
+```
+
+```{R}
+library(GGally)
+ggpairs(Presidentsx, aes(color=cluster))
+```
+According to the ggplot, 2 clusters are suggested. Performing a goodness-of-fit test, we can see that the average silhouette width is 0.871644, suggesting that a strong structure has been found. Prior to performing the PAM function, the numeric variables of the Presidents data set were isolated, using the select_if() function; additionally, the variable "Candidate Name" was mutated to become the row names. According to the slice() function, the candidates that were the 2 medioids were James E. Carter Jr. and Peter Camejo.
+
+The variable that shows the greatest difference between the two clusters is Popular Vote. The variable that shows the least difference between the two clusters is Election Year. 
+  
     
 ### Dimensionality Reduction with PCA
 
+##### Preparing Data for PCA
 ```{R}
-# PCA code here
+poke_nums <- Presidents %>% select_if(is.numeric) %>% scale
+rownames(poke_nums) <- Presidents$CandidateName
 ```
 
-Discussions of PCA here. 
+To perform PCA on this data set, I selected for all of the numeric variables [Electoral Vote, Electoral Vote Share, Popular Vote, Popular Vote Share, Election Year]. Furthermore, I named the rows by Candidate Name, so that they could be identified.
 
+##### PCA 
+```{R}
+poke_PCA <- princomp(poke_nums)
+names(poke_PCA)
+```
+
+##### Determining Which Principal Components to Retain
+```{R}
+eigval <- poke_PCA$sdev^2
+varprop = round(eigval/sum(eigval),2)
+ggplot() + geom_bar(aes(y = varprop, x = 1:5), stat = "identity", fill ="deeppink3", col="black") + 
+    xlab("") + geom_path(aes(y = varprop, x = 1:5)) + geom_text(aes(x = 1:5, 
+    y = varprop, label = round(varprop, 2)), vjust = 1, col = "white", 
+    size = 5) + scale_y_continuous(breaks = seq(0, 0.6, 0.2), 
+    labels = scales::percent) + scale_x_continuous(breaks = 1:10) + theme(plot.background = element_rect(fill = "aliceblue"), panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+```
+Based on the scree plot, 80% of the variance can be explained by the first two PCs. Therefore, these two can strongly explain the variance in the data. 
+
+##### Table of Loadings
+```{R}
+summary(poke_PCA, loadings=T)
+```
+On axis 1, there are strong, negative loadings for Popular Vote, Popular Vote Share, Electoral Votes and Electoral Share. On axis 2, there are positive loadings for Popular Vote and Election Year, and negative loadings for Electoral Vote Share. This likely explains the fact that, as Election Year increases, the Popular Vote + Popular Vote Share value for candidates increases [increasing yearly population size] 
+
+##### Visualizing PC Scores
+```{R}
+poke_PCA$loadings[1:5,1:2] %>% as.data.frame %>% rownames_to_column %>% 
+    ggplot() + geom_hline(aes(yintercept = 0), lty = 2) + geom_vline(aes(xintercept = 0), 
+    lty = 2) + ylab("PC2") + xlab("PC1") + geom_segment(aes(x = 0, 
+    y = 0, xend = Comp.1, yend = Comp.2), arrow = arrow(), col = "lightslateblue") + 
+    geom_label(aes(x = Comp.1 * 1.1, y = Comp.2 * 1.1, label = rowname)) + theme(plot.background = element_rect(fill = "mistyrose"), panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+```
 ###  Linear Classifier
 
+##### Logistic Regression Model
 ```{R}
-# linear classifier code here
+Presidents1 <- Presidents %>% mutate(y=ifelse(Incumbent=="Y",1,0))
+Presidents1 <- Presidents1 %>% select_if(is.numeric)
+fit <- glm(y~., data=Presidents1, family = "binomial") 
+prob <- predict(fit,type="response") 
+class_diag(prob, Presidents1$y, positive=1)
+```
+For the model, the accuracy is 0.9091, sensitivity [TPR] is 0.3125, specificity [TNR] is 0.9756, precision [PPV] is 0.5882, and AUC is 0.9077. Due to a low sensitivity, there might be false negatives. However, the AUC value implies that the model is pretty good! 
+
+##### Reporting Confusion Matrix
+```{R}
+table(predict=as.numeric(prob >.5),truth=Presidents1$y) %>% addmargins
 ```
 
+##### Cross-validation of Logistic Regression Model
 ```{R}
-# cross-validation of linear classifier here
+set.seed(1234)
+k=10 #choose number of folds
+data<-Presidents1[sample(nrow(Presidents1)),] #randomly order rows
+folds<-cut(seq(1:nrow(Presidents1)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$y ## Truth labels for fold i
+  ## Train model on training set (all but fold i)
+  fit<-glm(y~.,data=train,family="binomial")
+  ## Test model on test set (fold i) 
+  probs<-predict(fit,newdata = test,type="response")
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean) 
 ```
-
-Discussion here
+After running a k-fold CV on the same model, the AUC value is 0.7913; therefore, the model is not overfitting. The precision [PPV] is 0.4583, indicating that it is slightly less precise than before. 
 
 ### Non-Parametric Classifier
-
 ```{R}
 library(caret)
-# non-parametric classifier code here
+knn_fit <- knn3(y~., data=Presidents1, k=10)
+y_hat_knn <- predict(knn_fit,Presidents1)
+class_diag(y_hat_knn[,1],Presidents1$y, positive=1)
 ```
 
+##### Confusion Matrix
 ```{R}
-# cross-validation of np classifier here
+table(truth= factor(Presidents1$y==1, levels=c("TRUE","FALSE")),
+      prediction= factor(y_hat_knn[,1]>.5, levels=c("TRUE","FALSE"))) %>% addmargins
 ```
 
-Discussion
-
+##### Cross-Validation of NP Classifier 
+```{R}
+set.seed(1234)
+k=10 #choose number of folds
+data<-Presidents1[sample(nrow(Presidents1)),] #randomly order rows
+folds<-cut(seq(1:nrow(Presidents1)),breaks=k,labels=F) #create folds
+diags<-NULL
+for(i in 1:k){
+  ## Create training and test sets
+  train<-data[folds!=i,] 
+  test<-data[folds==i,]
+  truth<-test$y ## Truth labels for fold i
+  ## Train model on training set (all but fold i)
+  fit<-knn3(y~.,data=train)
+  ## Test model on test set (fold i) 
+  probs<-predict(fit, newdata = test)[,2]
+  ## Get diagnostics for fold i
+  diags<-rbind(diags,class_diag(probs,truth, positive=1))
+}
+summarize_all(diags,mean)
+```
+After performing a k-fold CV on this same model, an AUC value of 0.50702 was yielded; therefore, the k-fold CV is more accurate. The non-parametric model is not as accurate in its cross-validation performance as the linear model. 
 
 ### Regression/Numeric Prediction
 
 ```{R}
-# regression model code here
+Presidentslm <- Presidents1 %>% select(-y)
+fit<-lm(ElecVoteShare~.,data=Presidentslm) #predict Election Year from all other variables
+yhat<-predict(fit)
 ```
 
+##### Reporting MSE
 ```{R}
-# cross-validation of regression model here
+mean((Presidentslm$ElecVoteShare-yhat)^2)
 ```
 
-Discussion
+##### Cross-validation of Regression Model
+```{R}
+set.seed(1234)
+k=5
+data<-Presidentslm[sample(nrow(Presidentslm)),] #randomly order rows
+folds<-cut(seq(1:nrow(Presidentslm)),breaks=k,labels=F) #create folds
+
+diags<-NULL
+for(i in 1:k){
+  train<-data[folds!=i,]
+  test<-data[folds==i,]
+  ## Fit linear regression model to training set
+  fit<-lm(ElecVoteShare~.,data=Presidentslm)
+  ## Get predictions/y-hats on test set (fold i)
+  yhat<-predict(fit,newdata=test)
+  ## Compute prediction error  (MSE) for fold i
+  diags<-mean((test$ElecVoteShare-yhat)^2) 
+}
+mean(diags)
+```
+
+The MSE for the overall dataset is 51.35669; this value is quite high. A k-fold CV was performed on the same model; the average MSE across my k testing folds is 69.06185. Since this value is higher than the Regression model's MSE, we can conclude that the model is not overfitting. 
 
 ### Python 
+##### R code chunk
+```{R}
+library(reticulate)
+use_python("/usr/bin/python3")
+
+cool<-"Merry"
+```
+
+##### Python code chunk
+```{python}
+cool="Christmas!"
+print(r.cool,cool)
+
+```
 
 ```{R}
 library(reticulate)
+cat(c(cool, py$cool))
 ```
 
-```{python}
-# python code here
-```
-
-Discussion
-
-### Concluding Remarks
-
-Include concluding remarks here, if any
+Using 'reticulate', we can share objects between R and python; in my code, I designated the object "cool" in R to give the output "Merry". I designated the object "cool" in Python to give the output "Christmas!". To retrieve my object stored in Python, I used the R code "py$cool". To retrieve my object stored in R, I used the Python code "r.cool".
 
 
 
